@@ -11,7 +11,7 @@ D3 -- Relay 1	(Light)
 D7 -- Relay 2	(Pump)
 */
 
-const char version[6] = "0.8.0";
+const char version[6] = "0.8.2";
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -47,8 +47,6 @@ char password[65];
 
 // const char *ssid     = "BZ_IOT";
 // const char *password = "Password";
-// const char *ssid     = "R&D_2";
-// const char *password = "1qaz7ujmrd2";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -74,7 +72,7 @@ byte pumpOnDelay = 10;
 byte pumpOffDelay = 10;
 char lineToken[44];
 byte viewPage = 1;
-byte moisValue = 0;
+float fMoisValue = 0.0;
 byte lowLimitMois = 30;
 
 // EEPROM Address
@@ -121,7 +119,7 @@ void sendLine(String msg) {
 	}
 }
 
-void setLight(bool state) {
+void setLight(bool state) { // Relay LOW Active
 	if (state == 0) digitalWrite(LIGHT_pin, HIGH);
 	else digitalWrite(LIGHT_pin, LOW);
 }
@@ -242,9 +240,9 @@ void callback(char* topic, byte* message, unsigned int length) {
 			EEPROM.commit();
 			DynamicJsonDocument docSend(128);
 			String MQTT_STR;
-			String MSG = "\nSet moisture low limit = " + String(lowLimitMois*10);
+			String MSG = "\nSet moisture low limit = " + String(lowLimitMois);
 			docSend["status"] = "OK";
-			docSend["message"] = "Set moisture low limit = " + String(lowLimitMois*10);
+			docSend["message"] = "Set moisture low limit = " + String(lowLimitMois);
 			serializeJson(docSend, MQTT_STR);
 			client.publish("watering/savestatus", MQTT_STR.c_str());
 			sendLine(MSG);
@@ -322,9 +320,9 @@ void pinDisp() {
 	lcd.print(time);
 	lcd.setCursor(0, 1);
 	String MSG = "Mst:";
-	if (moisValue > 99)			MSG += String(moisValue);
-	else if (moisValue < 100)	MSG += String(moisValue) + "  ";
-	else if (moisValue < 10)	MSG += String(moisValue) + "   ";
+	if (fMoisValue < 10)		MSG += String(fMoisValue, 0) + "%  ";
+	else if (fMoisValue < 100)	MSG += String(fMoisValue, 0) + "% ";
+	else if (fMoisValue > 99)	MSG += String(fMoisValue, 0) + "%";
 	lcd.print(MSG);
 }
 
@@ -338,7 +336,7 @@ void connectToWifi() {
 	byte retry = 0, config_done = 0, dot = 0;
 	WiFi.mode(WIFI_STA);
     while (WiFi.status() != WL_CONNECTED) {
-		delay(500);
+		delay(1000);
         Serial.print(".");
         if (dot > 15) dot = 0, lcd.setCursor(0, 1), lcd.print("                ");
         lcd.setCursor(dot, 1);
@@ -352,7 +350,7 @@ void connectToWifi() {
             lcd.print("SmartConfig...");
 			WiFi.beginSmartConfig();
 			while (true) {
-				delay(500);
+				delay(1000);
 				Serial.print(".");
                 if (dot > 15) dot = 0, lcd.setCursor(0, 1), lcd.print("                ");
                 lcd.setCursor(dot, 1);
@@ -392,9 +390,9 @@ void connectToWifi() {
 
 void reconnect() {
     if (!client.connected()) {
-        Serial.print("Attempting MQTT connection...");
+        // Serial.print("Attempting MQTT connection...");
         if (client.connect("ESP8266Client")) {
-            Serial.println("connected");
+            // Serial.println("connected");
             client.subscribe("watering/pump/set");
             client.subscribe("watering/light");
             client.subscribe("watering/line/act");
@@ -411,9 +409,11 @@ void reconnect() {
 
 void setup() {
 	system_update_cpu_freq(160);
-	digitalWrite(PUMP_pin, LOW);
-	digitalWrite(LIGHT_pin, LOW);
 	Serial.begin(115200);
+	pinMode(LED_BUILTIN, OUTPUT);
+	digitalWrite(LED_BUILTIN, HIGH);
+	digitalWrite(PUMP_pin, HIGH);
+	digitalWrite(LIGHT_pin, HIGH);
 	lcd.begin();
 	lcd.backlight();
 	lcd.clear();
@@ -461,14 +461,16 @@ void loop() {
 	setPump(pumpState);
 
 	if (millis() - moisReadTime > 1000) {
-		moisValue = ((1024 - analogRead(MOISTURE_pin)) / 1024) * 100;
-		// Serial.println(moisValue);
+		fMoisValue = ((1024 - analogRead(MOISTURE_pin)) / 1024.0) * 100;
+		// Serial.print("Moisture: ");
+		// Serial.print(fMoisValue, 1);
+		// Serial.println(" %");
 		moisReadTime = millis();
 	}
-	if (moisValue < lowLimitMois*10) {
+	if (fMoisValue < lowLimitMois) {
 		if ((millis() - pumpOnStoreTime > pumpOnDelay * 1000) && pumpState == 0) {	// Delay pump before turn on
 			pumpState = 1;											// Save pump state
-			sendLine("\nLow moisture (" + String(moisValue) + ")");
+			sendLine("\nLow moisture (" + String(fMoisValue, 1) + " %)");
 		}
 		pumpOffStoreTime = millis();								// Reset Pump off store time
 	} else {
@@ -507,7 +509,7 @@ void loop() {
 			PUMP_STATE = convState(pumpState);
 			lcd.print("Pu :" + PUMP_STATE);
 			lcd.setCursor(8, 0);
-			lcd.print("MoL:" + dispStr(lowLimitMois*10));
+			lcd.print("MoL:" + dispStr(lowLimitMois));
 			break;
 		
 		case 3:
@@ -543,8 +545,9 @@ void loop() {
 			docInfo["lightState"]	= String(lightState);
 			docInfo["temp"]			= String(temperature);
 			docInfo["hum"]			= String(humidity);
-			docInfo["mois"]			= String(moisValue);
-			docInfo["moisLimit"]	= String(lowLimitMois*10);
+			// docInfo["mois"]			= String(fMoisValue, 1);
+			docInfo["mois"]			= String(1024 - analogRead(MOISTURE_pin));
+			docInfo["moisLimit"]	= String(lowLimitMois);
 			String MQTT_STR;
 			serializeJson(docInfo, MQTT_STR);
 			client.publish("watering/info", MQTT_STR.c_str());
@@ -554,7 +557,7 @@ void loop() {
 			DynamicJsonDocument docInfo(64);
 			docInfo["temp"]		= String(temperature);
 			docInfo["hum"]		= String(humidity);
-			docInfo["mois"]		= String(moisValue);
+			docInfo["mois"]		= String(fMoisValue, 1);
 			String MQTT_STR;
 			serializeJson(docInfo, MQTT_STR);
 			client.publish("watering/log", MQTT_STR.c_str());
