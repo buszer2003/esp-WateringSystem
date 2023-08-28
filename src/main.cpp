@@ -64,6 +64,8 @@ byte dsSecOnes = 0;
 byte dsSecTens = 0;
 byte temperature = 0;
 byte humidity = 0;
+byte oldTemp = 0;
+byte oldHumi = 0;
 bool firstSend = 0;
 bool pumpState = 0;
 bool lightState = 0;
@@ -111,6 +113,10 @@ void getTime() {
 void getDht() {
 	temperature = dht.getTemperature();
 	humidity = dht.getHumidity();
+	if (temperature < 100) oldTemp = temperature;
+	else temperature = oldTemp;
+	if (humidity < 101) oldHumi = humidity;
+	else humidity = oldHumi;
 }
 
 void sendLine(String msg) {
@@ -320,9 +326,9 @@ void pinDisp() {
 	lcd.print(time);
 	lcd.setCursor(0, 1);
 	String MSG = "Mst:";
-	if (fMoisValue < 10)		MSG += String(fMoisValue, 0) + "%  ";
-	else if (fMoisValue < 100)	MSG += String(fMoisValue, 0) + "% ";
-	else if (fMoisValue > 99)	MSG += String(fMoisValue, 0) + "%";
+	if (fMoisValue < 10)		MSG += String(int(fMoisValue)) + "%  ";
+	else if (fMoisValue < 100)	MSG += String(int(fMoisValue)) + "% ";
+	else if (fMoisValue > 99)	MSG += String(int(fMoisValue)) + "%";
 	lcd.print(MSG);
 }
 
@@ -493,6 +499,8 @@ void loop() {
 	}
 
 	if (millis() - updateStatus > 500) {
+		// Serial.print("Pump State: ");
+		// Serial.println(convState(pumpState));
 		String PUMP_STATE;
 		switch (viewPage) {
 		case 1:
@@ -545,8 +553,8 @@ void loop() {
 			docInfo["lightState"]	= String(lightState);
 			docInfo["temp"]			= String(temperature);
 			docInfo["hum"]			= String(humidity);
-			// docInfo["mois"]			= String(fMoisValue, 1);
-			docInfo["mois"]			= String(1024 - analogRead(MOISTURE_pin));
+			docInfo["mois"]			= String(fMoisValue, 1);
+			// docInfo["mois"]			= String(1024 - analogRead(MOISTURE_pin));
 			docInfo["moisLimit"]	= String(lowLimitMois);
 			String MQTT_STR;
 			serializeJson(docInfo, MQTT_STR);
